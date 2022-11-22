@@ -52,7 +52,7 @@ set_user() {
 	while true
 	do
 
-	get_data "Do you want to lock root account? [Y]es/[N]o" rootpass
+	get_data "Do you want to lock root account? [Y]es/[N]o " rootpass
 
 	case $rootpass in
 		[yY])
@@ -114,15 +114,14 @@ sudo_setup() {
 }
 
 install_additional() {
-	log "Installing starship"
-	cargo install starship --root / || fatal "Starship install"
+	log "installing additional packages"
 
 	log "Installing paru"
 	cargo install paru --root / || fatal "Paru install"
 
 	log "Installing some aur packages with paru"
 
-	su "$username" -c -P "paru -S libxft-bgra"
+	su "$username" -c -P "paru -S libxft-bgra starship"
 
 	while true
 	do
