@@ -218,7 +218,7 @@ fstabing() {
 
 chrooting() {
 	log "Chrooting"
-	cp -R ../sali /mnt/sali || fatal "Copy sali to /mnt."
+	cp -R ../supersali /mnt/sali || fatal "Copy sali to /mnt."
 	arch-chroot /mnt /sali/deploy-internal $disk $disk0 || fatal "Arch-chroot."
 }
 
