@@ -152,7 +152,7 @@ install_additional() {
 
 xorg_copy_cfg() {
 	log "Setting up xorg"
-	cp /sali/system/xorg/* /etc/X11/xorg.conf.d/ &&
+	cp /sali/system/xorg/* /etc/X11/xorg.conf.d/ || fatal "Xorg copy config"
 }
 
 #user_configs() {
