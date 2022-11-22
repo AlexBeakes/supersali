@@ -1,0 +1,304 @@
+#!/bin/bash
+
+disk=$1
+disk0=$2
+
+log() {
+	local color_on=$'\e[0;32m'
+	local color_off=$'\e[0m'
+	echo "${color_on}[$(date)]${color_off} $@" >&2
+}
+
+fatal() {
+	local color_fatal=$'\033[0;31m'
+	log "${color_fatal} $@ Failed!"
+	log "${color_fatal}	Error!"
+	log "${color_fatal}	Exiting."
+	exit 1
+}
+
+get_data() {
+	read -r -p "$1" "$2" || fatal "Invalid input."
+}
+
+initial() {
+	log "Prerequisite install"
+	pacman -S vim sudo || fatal "Pacman"
+}
+
+locale() {
+	log "Setting up locale"
+	vim /etc/locale.gen &&
+	locale-gen || fatal "Locale"
+}
+
+set_user() {
+	log "Setting up user"
+	get_data "Enter your username:" username &&
+	groupadd nogroup &&
+	( sudo useradd nobody -G nogroup || sudo usermod nobody -G nogroup ) &&
+	useradd --create-home --groups "wheel" --user-group "$username" &&
+	log "Setting up the user password" || fatal "Setting up users and groups"
+
+	while true
+	do
+		passwd "$username" &&
+		break
+		log "Try again"
+	done
+
+	log "Setting up the root account"
+
+	while true
+	do
+
+	get_data "Do you want to lock root account? [Y]es/[N]o" rootpass
+
+	case $rootpass in
+		[yY])
+			log "Locking root account!"
+			passwd -l root || fatal "Locking root account"
+			break
+			;;
+		[nN])
+			log "Setting up root password"
+			passwd root
+			break
+			;;
+		*)
+			echo "Invalid input..."
+			;;
+	esac
+done
+}
+
+pacman_setup() {
+	log "Setting up pacman"
+	cp /sali/system/pacman/pacman.conf /etc/ &&
+	pacman -Sy || fatal "Pacman"
+}
+
+pacman_install() {
+	log "Installing all needed packages from pacman"
+	pacman -S grub efibootmgr reflector autoconf-archive dosfstools\
+		texlive-most texlive-bin texlive-lang libreoffice \
+		noto-fonts-emoji ttf-droid ttf-dejavu gsfonts fontconfig \
+		neovim ranger zathura zathura-pdf-mupdf sxiv \
+		base-devel git rust python3 ansible shellcheck gdb \
+		time bc ufw binwalk traceroute bash-completion \
+		wpa_supplicant dhcpcd bind-tools wget iwd \
+		libnotify dunst gtk2 picom \
+		xorg xorg-xinit libxrender xautolock xclip \
+		libinput xf86-video-intel cups \
+		diffutils xorg-xprop gcr \
+		xcompmgr feh xorg-setxkbmap \
+		pulseaudio pulseaudio-bluetooth \
+		zip unzip squashfs-tools gdisk \
+		lm_sensors htop iotop powertop \
+		pamixer pavucontrol alsa-utils alsa-oss sof-firmware \
+		scrot imagemagick \
+		openssh sshfs rsync duplicity openvpn \
+		bluez bluez-utils blueman \
+		mpv mpc mpd yt-dlp \
+		system-config-printer \
+		lynx elinks \
+		pass pass-otp pwgen zbar  || fatal "Packman"
+}
+
+sudo_setup() {
+	log "Setting up sudo"
+	chmod u+w /etc/sudoers &&
+	echo "%wheel ALL=(ALL) ALL #" >> /etc/sudoers &&
+	echo "Defaults editor=/bin/nvim" >> /etc/sudoers &&
+	chmod u-w /etc/sudoers || fatal "Sudo"
+}
+
+install_additional() {
+	log "Installing starship"
+	cargo install starship --root / || fatal "Starship install"
+
+	log "Installing paru"
+	cargo install paru --root / || fatal "Paru install"
+
+	log "Installing some aur packages with paru"
+
+	su "$username" -c -P "paru -S libxft-bgra"
+
+	while true
+	do
+		get_data "Do you want to install mutt-wizard-git? [Y/n] " input
+
+		case $input in
+		    [yY][eE][sS]|[yY])
+				log "Installing mutt-wizard-git"
+				su "$username" -c -P "paru -S mutt-wizard-git"
+				break
+				;;
+		    [nN][oO]|[nN])
+				log "Not installing mutt-wizard-git"
+				break
+		    ;;
+		    *)
+			echo "Invalid input..."
+			;;
+		esac
+	done
+}
+
+#dir_setup() {
+#	(mkdir -p /home/"$username"/.config || log ".config exists")
+#	mkdir -p /home/"$username"/Pictures/Screenshots || log "Screenshots exists"
+#}
+
+xorg_copy_cfg() {
+	log "Setting up xorg"
+	cp /sali/system/xorg/* /etc/X11/xorg.conf.d/ &&
+}
+
+#user_configs() {
+#	log "Setting up user configs"
+#	#sali_userspace_build
+#}
+
+### refine
+#suckless() {
+#	[ -d "$HOME/git" ] || mkdir $HOME/git || fatal "Git directory setup"
+#	cd $HOME/git || fatal "Git directory setup"
+#	log "Setting up suckless"
+#	git clone https://github.com/inceye/sali-suckless-build.git &&
+#	cd $HOME/git/sali-suckless-build &&
+#	./deploy || fatal "Suckless setup"
+#}
+
+nvim_conf() {
+	[ -d "$HOME/git" ] || mkdir $HOME/git || fatal "Git directory setup"
+	cd $HOME/git || fatal "Git directory setup"
+	log "Setting up nvim"
+	git clone https://github.com/inceye/sali-nvim.git &&
+	ln -s $HOME/git/sali-nvim .config/nvim || fatal "Neovim setup"
+}
+
+pulseaudio_conf() {
+	while true
+	do
+		get_data "Do you have a bluetooth card? [Y/n] " input
+
+		case $input in
+		    [yY][eE][sS]|[yY])
+				log "Setting up bluetooth and pulseaudio"
+				cp /etc/pulse/system.pa /etc/pulse/system.pa.bac &&
+				cp /sali/system/wireless/pulseaudio-bluetooth-mod.pa /etc/pulse/system.pa &&
+				cp /sali/system/wireless/main.conf /etc/bluetooth/main.conf || fatal "Bluetooth and pulseaudio"
+				break
+				;;
+		    [nN][oO]|[nN])
+				log "Not setting up bluetooth and pulseaudio"
+				break
+		    ;;
+		    *)
+			echo "Invalid input..."
+			;;
+		esac
+	done
+}
+
+alsa_kernel_modules() {
+	# Since udev>=171, the OSS emulation modules (snd_seq_oss, snd_pcm_oss, snd_mixer_oss) are not loaded by default
+	while true
+	do
+		get_data "Do you want to load OSS emulation modules? [Y/n] " input
+
+		case $input in
+		    [yY][eE][sS]|[yY])
+				log "Option is not working yet"
+				log "You have to load them manually next boot time"
+				log "The commands are: modprobe snd_seq_oss snd_pcm_oss snd_mixer_oss"
+#				log "Setting up OSS emulation modules"
+#				modprobe snd_seq_oss &&
+#				modprobe snd_pcm_oss &&
+#				modprobe snd_mixer_oss || fatal "Installing OSS modules..."
+				break
+				;;
+		    [nN][oO]|[nN])
+				log "Not setting up OSS emulation modules"
+				break
+		    ;;
+		    *)
+			echo "Invalid input..."
+			;;
+		esac
+	done
+
+	log "Finished with alsa"
+
+}
+
+systemd_setup() {
+	log "Setting up systemd"
+	cp /sali/system/services/* /etc/systemd/system/ &&
+	systemctl enable lock@"$username" &&
+	systemctl enable dhcpcd &&
+	systemctl enable bluetooth &&
+	systemctl enable ufw &&
+	systemctl enable cups &&
+	cp /sali/system/systemd/* /etc/systemd/ || fatal "Systemd"
+}
+
+
+kernel_config() {
+	while true
+	do
+
+	get_data "What bootloader do you want to install? ([B]ios/[U]efi)" bootsetup
+	case $bootsetup in
+		[gG]|[gG][rR][uU][bB])
+			log "Setting up BIOS"
+			grub-install --target=i386-pc $disk || fatal "Installing GRUB in legacy BIOS mode!"
+			break
+			;;
+		[uU]|[uU][eE][fF][iI])
+			log "Setting up UEFI"
+			grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB || fatal "Installing GRUB in UEFI mode!"
+			break
+			;;
+		*)
+			echo "Invalid input..."
+			;;
+	esac
+	done
+
+	log "Getting disk information"
+	cryptuuid=$(blkid | grep "$(echo $disk0)2" | awk '{print $2}' | sed 's/"//g') &&
+
+	dgrub=$(sed -s "s/CRYPTDEV/$cryptuuid/" /sali/system/kernel/grub) &&
+	echo "$dgrub" > /etc/default/grub &&
+	grub-mkconfig -o /boot/grub/grub.cfg || fatal "GRUB config!!!!!!!!!!"
+
+	log "Setting up mkinitcpio"
+	cp /sali/system/kernel/mkinitcpio.conf /etc/mkinitcpio.conf &&
+	mkinitcpio -p linux || fatal "Mkinitcpio linux!!!!!!"
+}
+
+
+
+stage2_install() {
+	log "Installing stage2"
+	initial
+	locale
+	set_user
+	pacman_setup
+	pacman_install
+	sudo_setup
+	install_additional
+#	dir_setup
+	xorg_copy_cfg
+#	user_configs
+	pulseaudio_conf
+	alsa_kernel_modules
+	systemd_setup
+#	swap_setup
+	kernel_config
+	chown -R "$username":"$username" /home/"$username" || fatal "Chown"
+}
+
+stage2_install

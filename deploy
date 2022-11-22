@@ -1,0 +1,267 @@
+#!/bin/bash
+
+log() {
+	local color_on=$'\e[0;32m'
+	local color_off=$'\e[0m'
+	echo "${color_on}[$(date)]${color_off} $@" >&2
+}
+
+fatal() {
+	local color_fatal=$'\033[0;31m'
+	log "${color_fatal} $@ Failed!"
+	log "${color_fatal}	Error!"
+	log "${color_fatal}	Exiting."
+	exit 1
+}
+
+get_data() {
+	read -r -p "$1" "$2" || fatal "Invalid input."
+}
+
+check_inet() {
+	log "Checking internet connection"
+	ping -q -c 1 1.1.1.1 > /dev/null || ping -q -c 1 1.0.0.1 > /dev/null || ping -q -c 1 8.8.8.8 > /dev/null || ping -q -c 1 8.8.4.4 > /dev/null || fatal "No internet connection detected."
+}
+
+ask_get_mirrors() {
+	while true
+	do
+		read -r -p "Do you want to set up optimal mirrors? Or set them up manually? This might take a long time. [Yes/Set/No] " input
+	
+		case $input in
+		    [yY][eE][sS]|[yY])
+				log "Getting mirrors"
+				get_mirrors >/dev/null 2>&1
+				break
+				;;
+				[sS][eE][tT]|[s])
+				log "Setting up mirorrs"
+				vim /etc/pacman.d/mirrorlist
+				break
+				;;
+		    [nN][oO]|[nN])
+				log "Not setting up mirrors."
+				log "The default ones are going to be used."
+				break
+		    ;;
+		    *)
+			echo 'Invalid input...'
+			;;
+		esac
+	done
+}
+
+get_mirrors() {
+	log "Pulling mirrorlist and ranking mirrors"
+	reflector --age 24 --protocol https --sort rate --save /etc/pacman.d/mirrorlist &&
+	log "Updating pacman"
+	pacman -Sy || fatal "Install mirrorlist."
+}
+
+get_disk() {
+	get_data "Enter the disk that archlinux will be installed on (e.g. /dev/sdx) " disk
+
+	case $disk in
+		*"sd"*)
+			log "Got a /dev/sd* disk!!!"
+			disk0="${disk}"
+			;;
+		*"nvme"*)
+			log "Got a /dev/nvme* disk!!!"
+			disk0="${disk}p"
+			;;
+		*)
+			fatal "Invalid input... (we might not support a such a disk)"
+			exit 1
+			;;
+	esac
+}
+
+consent() {
+	while true
+	do
+		get_data "Are you sure you want to install archlinux in disk $disk0? All contents of the disk will be WIPED [Yes/No] " input
+	
+		case $input in
+		    Yes)
+				echo "Yes"
+				log "Proceding"
+				break
+				;;
+		    No)
+				echo "No"
+				fatal "You have terminated the script!!!"
+				exit 1
+		    ;;
+		    *)
+			echo 'Invalid input... Type "Yes" or "No"'
+			;;
+		esac
+	done
+}
+
+partition_disk() {
+	log "Formatting disk"
+	fdisk "$disk" << FDISK_CMDS_PREP || fatal "Format disks."
+g
+w
+FDISK_CMDS_PREP
+
+		# Check the second partition creation (mb not the rest of the drive is added to the partition)
+	fdisk "$disk" << FDISK_CMDS || fatal "Create partitions"
+n
+1
+
++512MiB
+n
+2
+
+
+t
+1
+1
+t
+2
+20
+w
+FDISK_CMDS
+}
+
+get_passwd() {
+	while true
+	do
+		read -r -s -p "Enter a password for cryptography:" passroot &&
+		echo ""
+		read -r -s -p "Repeat the password for cryptography:" passrootrpt &&
+		echo ""
+		if [ "$passroot" == "$passrootrpt" ]
+		then
+			log "Passwords match, proceeding"
+			passrootrpt="" || fatal "Error with password setup"
+			break
+		else
+			log "${color_fatal} Passwords don't match, try again"
+			continue
+		fi
+	done
+}
+
+set_crypt() {
+	log "Setting up cryptography"
+	echo -e "$passroot" | cryptsetup luksFormat --hash=sha512 --key-size=512 --cipher=aes-xts-plain64 --type luks2 --iter-time=20000 $(echo "$disk0")2 || fatal "Cryptroot."
+}
+
+unlock_crypt() {
+	log "Decrypting partitions"
+	echo -e "$passroot" | cryptsetup open $(echo "$disk0")2 crypt &&
+	passroot="" || fatal "Unlocking partitions."
+}
+
+lvm_setup() {
+	log "Creating lvm drives"
+	pvcreate /dev/mapper/crypt &&
+	vgcreate vg0 /dev/mapper/crypt &&
+	get_data "Enter the ammount of swap you wish to have (in GB) " swapsize &&
+	lvcreate -L $(echo "$swapsize")G vg0 -n swap &&
+	lvcreate -l 100%FREE vg0 -n btrfs || fatal "Creating lvm partitions"
+}
+
+format_partitions() {
+	log "Formatting partitions"
+	mkfs.btrfs /dev/mapper/vg0-btrfs &&
+	mkswap /dev/mapper/vg0-swap &&
+	mkfs.vfat $(echo "$disk0")1 || fatal "Formatting partitions."
+}
+
+set_btrfs() {
+	log "Setting up btrfs sub"
+	mount -t btrfs /dev/mapper/vg0-btrfs /mnt &&
+	btrfs subvolume create @ &&
+	btrfs subvolume create @home &&
+	btrfs subvolume create @tmp &&
+	btrfs subvolume create @snapshots &&
+	btrfs subvolume create @var_log &&
+	btrfs subvolume create @var_cache &&
+	btrfs subvolume create @var_tmp &&
+	umount /mnt || fatal "Creating btrfs subvolumes"
+}
+
+mount_partitions() {
+	log "Mounting partitions"
+	mount -t btrfs -o subvol=@,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt &&
+	mkdir /mnt/home &&
+	mount -t btrfs -o subvol=@home,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt/home &&
+	mkdir /mnt/tmp &&
+	mount -t btrfs -o subvol=@tmp,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt/tmp &&
+	mkdir /mnt/.snapshots &&
+	mount -t btrfs -o subvol=@snapshots,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt/.snapshots &&
+	mkdir -p /mnt/var/log &&
+	mount -t btrfs -o subvol=@var_log,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt/var/log &&
+	mkdir /mnt/var/tmp &&
+	mount -t btrfs -o subvol=@var_tmp,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt/var/tmp &&
+	mkdir /mnt/var/cache &&
+	mount -t btrfs -o subvol=@var_cache,defaults,x-mount.mkdir,compress=lzo,ssd,noatime /dev/mapper/vg0-btrfs /mnt/var/cache
+	mkdir /mnt/boot &&
+	mount $(echo "$disk0")1 /mnt/boot &&
+	swapon /dev/mapper/vg0-swap || fatal "Mounting partitions."
+}
+
+pacstrapping() {
+	log "Pacstrapping"
+	pacstrap /mnt base linux linux-firmware lvm2 btrfs-progs || fatal "Packstrapping."
+}
+
+fstabing() {
+	log "Fstabing"
+	genfstab -L -p /mnt >> /mnt/etc/fstab || fatal "Fstabing."
+}
+
+chrooting() {
+	log "Chrooting"
+	cp -R ../sali /mnt/sali || fatal "Copy sali to /mnt."
+	arch-chroot /mnt /sali/deploy-internal $disk $disk0 || fatal "Arch-chroot."
+}
+
+reboot_logic() {
+	while true
+	do
+		read -r -p "Do you want to reboot? [Y/n] " input
+
+		case $input in
+		    [yY][eE][sS]|[yY])
+				echo "Yes"
+				sudo reboot
+				;;
+		    [nN][oO]|[nN])
+				echo "No"
+				echo "The script is finished, don't forget to reboot."
+				break
+				;;
+		    *)
+			echo "Invalid input..."
+			;;
+		esac
+	done
+}
+
+stage1_install() {
+	log "Starting stage1 install..."
+	check_inet
+	ask_get_mirrors
+	get_disk
+	consent
+	partition_disk
+	get_passwd
+	set_crypt
+	unlock_crypt
+	lvm_setup
+	format_partitions
+	set_btrfs
+	mount_partitions
+	pacstrapping
+	fstabing
+	chrooting
+	reboot_logic
+}
+
+stage1_install
