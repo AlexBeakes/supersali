@@ -176,13 +176,13 @@ format_partitions() {
 set_btrfs() {
 	log "Setting up btrfs sub"
 	mount -t btrfs /dev/mapper/vg0-btrfs /mnt &&
-	btrfs subvolume create @ /mnt &&
-	btrfs subvolume create @home /mnt &&
-	btrfs subvolume create @tmp /mnt &&
-	btrfs subvolume create @snapshots /mnt &&
-	btrfs subvolume create @var_log /mnt &&
-	btrfs subvolume create @var_cache /mnt &&
-	btrfs subvolume create @var_tmp /mnt &&
+	btrfs subvolume create /mnt/@ &&
+	btrfs subvolume create /mnt/@home &&
+	btrfs subvolume create /mnt/@tmp &&
+	btrfs subvolume create /mnt/@snapshots &&
+	btrfs subvolume create /mnt/@var_log &&
+	btrfs subvolume create /mnt/@var_cache &&
+	btrfs subvolume create /mnt/@var_tmp &&
 	umount /mnt || fatal "Creating btrfs subvolumes"
 }
 
