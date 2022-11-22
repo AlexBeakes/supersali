@@ -233,14 +233,25 @@ alsa_kernel_modules() {
 
 }
 
+dns_setup() {
+	log "Setting up secure DNS resolving"
+	log "Using systemd-resolved"
+	cp /sali/system/network/dhcpcd.conf /etc/dhcpcd.conf &&
+	cp /sali/system/network/resolv.conf /etc/resolv.conf &&
+	cp /sali/system/network/resolvconf.conf /etc/resolvconf.conf &&
+	cp /sali/system/network/resolved.conf /etc/systemd/resolved.conf || fatal "Copying dns/dhcpd config files!"
+}
+
 systemd_setup() {
 	log "Setting up systemd"
+	log "Enabling services"
 	cp /sali/system/services/* /etc/systemd/system/ &&
 	systemctl enable lock@"$username" &&
 	systemctl enable dhcpcd &&
 	systemctl enable bluetooth &&
 	systemctl enable ufw &&
 	systemctl enable cups &&
+	systemctl enable systemd-resolved &&
 	cp /sali/system/systemd/* /etc/systemd/ || fatal "Systemd"
 }
 
@@ -295,6 +306,7 @@ stage2_install() {
 #	user_configs
 	pulseaudio_conf
 	alsa_kernel_modules
+	dns_setup
 	systemd_setup
 #	swap_setup
 	kernel_config
