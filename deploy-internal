@@ -84,7 +84,7 @@ pacman_install() {
 		texlive-most texlive-bin texlive-lang libreoffice \
 		noto-fonts-emoji ttf-droid ttf-dejavu gsfonts fontconfig \
 		neovim ranger zathura zathura-pdf-mupdf sxiv \
-		base-devel git rust python3 ansible shellcheck gdb \
+		base-devel cmake git rust python3 ansible shellcheck gdb \
 		time bc ufw binwalk traceroute bash-completion \
 		wpa_supplicant dhcpcd bind-tools wget iwd \
 		libnotify dunst gtk2 picom \
@@ -102,7 +102,8 @@ pacman_install() {
 		mpv mpc mpd yt-dlp \
 		system-config-printer \
 		lynx elinks \
-		pass pass-otp pwgen zbar  || fatal "Packman"
+		pass pass-otp pwgen zbar libfido2 \
+		starship || fatal "Packman"
 }
 
 sudo_setup() {
@@ -117,11 +118,12 @@ install_additional() {
 	log "installing additional packages"
 
 	log "Installing paru"
-	cargo install paru --root / || fatal "Paru install"
+	su "$username" -c -P "git clone https://aur.archlinux.org/paru.git /home/${username}/paru" &&
+	su "$username" -c -P "cd /home/${username}/paru; makepkg -si" || log "Unable to install paru! Continuing!"
 
 	log "Installing some aur packages with paru"
 
-	su "$username" -c -P "paru -S libxft-bgra starship"
+	su "$username" -c -P "paru -S libxft-bgra"
 
 	while true
 	do
